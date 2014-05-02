@@ -11,7 +11,7 @@ import (
     "time"
     "sync"
     "encoding/json"
-    "io/ioutil"
+    "code.google.com/p/go.net/html"
     //"github.com/opesun/goquery"
     "code.google.com/p/go-html-transform/html/transform"
     "code.google.com/p/go-html-transform/h5"
@@ -30,7 +30,7 @@ type CategoryList struct {
 
 var (
     blekkoSubCat = regexp.MustCompile("^/blekko/")
-    scraperConfig = ScraperConfig {UserAgent: "titleScraper/1.0"}
+    scraperConfig = ScraperConfig {UserAgent: "titleScraper/1.1"}
     categorySet = make(map[string]bool)
     workPool = make(chan bool, 4)
     catLock = sync.Mutex{}
@@ -69,22 +69,22 @@ func fetchTagUrls(url string) []string {
     defer resp.Body.Close()
 
     if resp.StatusCode == 200 {
-        doc, err := transform.NewDocFromReader(resp.Body)
+        tree, err := h5.New(resp.Body)
         if err != nil {
             log.Printf("HTML_ERROR url:'%s' error:'%s'\n", url, err)
             return output
         }
 
-        t := transform.NewTransform(doc)
-        var GetUrls = func(n *h5.Node) {
+        var GetUrls = func(n *html.Node) {
                 for _, a := range n.Attr {
-                    if a.Name == "href" {
-                        output = append(output, a.Value)
+                    if a.Key == "href" {
+                        output = append(output, a.Val)
                         break
                     }
                 }
         }
-        t.Apply(GetUrls, "#tags-directory", "ul", "li", "a")
+        t := transform.New(tree)
+        t.Apply(GetUrls, "#tags-directory ul li a")
     }
     return output
 }
@@ -95,7 +95,7 @@ func fetchCategory(url string) Category {
 
     httpClient := http.Client{
         Transport: &http.Transport{
-            Dial: timeoutDialler(time.Duration(10*time.Second)),
+            Dial: timeoutDialler(time.Duration(10)*time.Second),
             DisableKeepAlives: true,
         },
     }
@@ -111,7 +111,7 @@ func fetchCategory(url string) Category {
 
     if resp.StatusCode == 200 {
 
-        doc, err := transform.NewDocFromReader(resp.Body)
+        tree, err := h5.New(resp.Body)
         if err != nil {
             log.Printf("HTML_ERROR url:'%s' error:'%s'\n", url, err)
             return output
@@ -123,9 +123,9 @@ func fetchCategory(url string) Category {
 
         if !categorySet[output.Name] {
             // prevent cycles. this is wonky, but will do for now
-            t := transform.NewTransform(doc)
-            var getUrls = func(n *h5.Node) {
-                urls := strings.Split(n.Children[0].Data(), "\n")
+            t := transform.New(tree)
+            var getUrls = func(n *html.Node) {
+                urls := strings.Split(n.FirstChild.Data, "\n")
                 for _, item := range urls {
                     item = strings.TrimSpace(item)
                     // if we encounter a subcategory, recurse
@@ -170,26 +170,11 @@ func fetchCategoryGQ(url string) Category {
 
     if resp.StatusCode == 200 {
 
-        body, err := ioutil.ReadAll(resp.Body)
+        tree, err := h5.New(resp.Body)
         if err != nil {
             log.Printf("HTML_ERROR url:'%s' error:'%s'\n", url, err)
             return output
         }
-
-        /*
-        doc, err := goquery.Parse(string(body))
-        if err != nil {
-            log.Printf("HTML_ERROR url:'%s' error:'%s'\n", url, err)
-            return output
-        }
-        */
-        parser := h5.NewParserFromString(string(body))
-        err = parser.Parse()
-        if err != nil {
-            log.Printf("HTML_ERROR url:'%s' error:'%s'\n", url, err)
-            return output
-        }
-        doc := parser.Tree()
 
         pathFragments := strings.Split(url, "/")
         output.Name = pathFragments[len(pathFragments)-1];
@@ -204,9 +189,9 @@ func fetchCategoryGQ(url string) Category {
             }
             */
 
-            t := transform.NewTransform(doc)
-            var getUrls = func(n *h5.Node) {
-                urls := strings.Split(n.Children[0].Data(), "\n")
+            t := transform.New(tree)
+            var getUrls = func(n *html.Node) {
+                urls := strings.Split(n.FirstChild.Data, "\n")
                 for _, item := range urls {
                     item = strings.TrimSpace(item)
                     if blekkoSubCat.MatchString(item) {
